@@ -146,7 +146,7 @@ public class UsuarioController {
             cargaRepository.delete(carga);
         }
 
-        // 3. Borrar las rutas del usuario (y las ofertas que las apuntan)
+        // 3. Borrar las rutas del usuario(y las ofertas que las apuntan)
         List<Ruta> rutas = rutaRepository.findByUsuario_IdUsuario(id);
         for (Ruta ruta : rutas) {
             ofertaRepository.deleteByRutaId(ruta.getIdRuta()); // CORREGIDO AQUÍ
