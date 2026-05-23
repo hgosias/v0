@@ -1,12 +1,18 @@
 package com.transecotec.v0.controllers;
 
 import com.transecotec.v0.dto.LoginRequest;
+import com.transecotec.v0.models.Carga;
+import com.transecotec.v0.models.Ruta;
 import com.transecotec.v0.models.Usuario;
+import com.transecotec.v0.repositories.CargaRepository;
+import com.transecotec.v0.repositories.OfertaRepository;
+import com.transecotec.v0.repositories.RutaRepository;
 import com.transecotec.v0.repositories.UsuarioRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -14,7 +20,7 @@ import java.util.Optional;
 
 @RestController
 @RequestMapping("/api/usuarios")
-@CrossOrigin(origins = "*") // Permite peticiones desde tu frontend en local
+@CrossOrigin(origins = "*") // Permite peticiones desde tu frontend
 public class UsuarioController {
 
     @Autowired
@@ -23,60 +29,51 @@ public class UsuarioController {
     @Autowired
     private UsuarioRepository usuarioRepository;
 
+    @Autowired
+    private RutaRepository rutaRepository;
+
+    @Autowired
+    private CargaRepository cargaRepository;
+
+    @Autowired
+    private OfertaRepository ofertaRepository;
+
     // 1. Obtener todos los usuarios
     @GetMapping
     public List<Usuario> getAllUsuarios() {
         return usuarioRepository.findAll();
     }
 
-    // 2. Crear un nuevo usuario - Registro (Restaurado el @PostMapping)
+    // 2. Crear un nuevo usuario - Registro
     @PostMapping
     public ResponseEntity<?> createUsuario(@RequestBody Usuario usuario) {
-        // Validación básica para no duplicar correos
         if (usuarioRepository.findByEmail(usuario.getEmail()) != null) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("El correo ya está registrado");
         }
 
-        // --- CIFRADO DE CONTRASEÑA ---
-        // Usamos getContrasena() para que coincida con la nomenclatura de tu modelo
         String passwordPlana = usuario.getContrasena();
-
-        // La pasamos por el algoritmo BCrypt
         String passwordCifrada = passwordEncoder.encode(passwordPlana);
-
-        // Reemplazamos la contraseña plana por la cifrada en el objeto
         usuario.setContrasena(passwordCifrada);
-        // --------------------------------------
 
-        // Ahora sí, guardamos el usuario en la base de datos con la contraseña segura
         Usuario nuevoUsuario = usuarioRepository.save(usuario);
-
         return ResponseEntity.ok(nuevoUsuario);
     }
 
-    // 3. NUEVO: Iniciar Sesión (Login) con validación segura
+    // 3. Iniciar Sesión (Login) con validación segura
     @PostMapping("/login")
     public ResponseEntity<?> login(@RequestBody LoginRequest loginRequest) {
-        // Buscamos al usuario por su email
         Usuario usuario = usuarioRepository.findByEmail(loginRequest.getEmail());
 
-        // Si el usuario no existe, devolvemos error
         if (usuario == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Correo o contraseña incorrectos");
         }
 
-        // --- VALIDACIÓN BCRYPT ---
-        // Comparamos la contraseña escrita en el frontend con el hash de la BD usando matches()
         boolean passwordCorrecta = passwordEncoder.matches(loginRequest.getContrasena(), usuario.getContrasena());
 
         if (passwordCorrecta) {
-            // Por seguridad, no devolvemos el hash al frontend
             usuario.setContrasena(null);
-
-            // Devolvemos el usuario (con status 200 OK)
             return ResponseEntity.ok(usuario);
         } else {
-            // Si la contraseña no coincide, devolvemos error 401
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Correo o contraseña incorrectos");
         }
     }
@@ -92,22 +89,16 @@ public class UsuarioController {
 
         Usuario usuarioExistente = usuarioOpt.get();
 
-        // Actualizamos los datos básicos
         usuarioExistente.setNombre(datosActualizados.getNombre());
         usuarioExistente.setEmail(datosActualizados.getEmail());
         usuarioExistente.setCifDni(datosActualizados.getCifDni());
 
-        // Solo actualizamos la contraseña si el usuario ha escrito una nueva
         if (datosActualizados.getContrasena() != null && !datosActualizados.getContrasena().trim().isEmpty()) {
-            // ¡IMPORTANTE! Si el usuario cambia la contraseña, también la ciframos antes de guardar
             String nuevaContrasenaCifrada = passwordEncoder.encode(datosActualizados.getContrasena());
             usuarioExistente.setContrasena(nuevaContrasenaCifrada);
         }
 
-        // Guardamos los cambios
         Usuario usuarioGuardado = usuarioRepository.save(usuarioExistente);
-
-        // Por seguridad, no devolvemos la contraseña al frontend
         usuarioGuardado.setContrasena(null);
 
         return ResponseEntity.ok(usuarioGuardado);
@@ -118,7 +109,6 @@ public class UsuarioController {
     // 1. Obtener lista de usuarios pendientes
     @GetMapping("/pendientes")
     public ResponseEntity<List<Usuario>> getUsuariosPendientes() {
-        // Busca todos los usuarios cuyo estado sea "Pendiente"
         List<Usuario> pendientes = usuarioRepository.findByEstadoVerificacion("Pendiente");
         return ResponseEntity.ok(pendientes);
     }
@@ -138,14 +128,34 @@ public class UsuarioController {
         return ResponseEntity.ok(usuarioRepository.save(usuario));
     }
 
-    // 3. Eliminar usuario permanentemente (Administrador)
+    // 3. Eliminar usuario permanentemente (Administrador) LIMPIEZA TOTAL
+    @Transactional
     @DeleteMapping("/{id}")
     public ResponseEntity<?> eliminarUsuario(@PathVariable Long id) {
         if (!usuarioRepository.existsById(id)) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body("Usuario no encontrado");
         }
 
+        // 1. Borrar todas las ofertas que este usuario haya ENVIADO a otros
+        ofertaRepository.borrarOfertasPorUsuarioEmisor(id);
+
+        // 2. Borrar las cargas del usuario (y las ofertas que las apuntan)
+        List<Carga> cargas = cargaRepository.findByUsuario_IdUsuario(id);
+        for (Carga carga : cargas) {
+            ofertaRepository.borrarOfertasPorCarga(carga.getIdCarga());
+            cargaRepository.delete(carga);
+        }
+
+        // 3. Borrar las rutas del usuario (y las ofertas que las apuntan)
+        List<Ruta> rutas = rutaRepository.findByUsuario_IdUsuario(id);
+        for (Ruta ruta : rutas) {
+            ofertaRepository.deleteByRutaId(ruta.getIdRuta()); // CORREGIDO AQUÍ
+            rutaRepository.delete(ruta);
+        }
+
+        // 4. Finalmente, borrar al usuario
         usuarioRepository.deleteById(id);
-        return ResponseEntity.ok("Usuario eliminado con éxito");
+
+        return ResponseEntity.ok().body("{\"mensaje\": \"Usuario y todos sus datos eliminados con éxito\"}");
     }
 }

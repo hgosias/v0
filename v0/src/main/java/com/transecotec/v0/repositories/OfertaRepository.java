@@ -22,20 +22,22 @@ public interface OfertaRepository extends JpaRepository<OfertaAcuerdo, Long> {
     @Query("DELETE FROM OfertaAcuerdo o WHERE o.ruta.idRuta = :idRuta")
     void deleteByRutaId(@Param("idRuta") Long idRuta);
 
-    // Comprobar si ya existe una petición de ese usuario para esa ruta
-    boolean existsByUsuarioEmisor_IdUsuarioAndRuta_IdRuta(Long idUsuarioEmisor, Long idRuta);
-
-    // Comprobar si ya existe una petición de ese usuario para esa carga
-    boolean existsByUsuarioEmisor_IdUsuarioAndCarga_IdCarga(Long idUsuarioEmisor, Long idCarga);
-
+    // Borrar las ofertas asociadas a una carga antes de eliminarla
     @Modifying
     @Transactional
     @Query("DELETE FROM OfertaAcuerdo o WHERE o.carga.idCarga = :idCarga")
     void borrarOfertasPorCarga(@Param("idCarga") Long idCarga);
 
+    // Borrar todas las ofertas/peticiones enviadas por un usuario
     @Modifying
     @Transactional
-    @Query("DELETE FROM OfertaAcuerdo o WHERE o.ruta.idRuta = :idRuta")
-    void borrarOfertasPorRuta(@Param("idRuta") Long idRuta);
+    @Query("DELETE FROM OfertaAcuerdo o WHERE o.usuarioEmisor.idUsuario = :idUsuario")
+    void borrarOfertasPorUsuarioEmisor(@Param("idUsuario") Long idUsuario);
+
+    // Comprobar si ya existe una petición de ese usuario para esa ruta
+    boolean existsByUsuarioEmisor_IdUsuarioAndRuta_IdRuta(Long idUsuarioEmisor, Long idRuta);
+
+    // Comprobar si ya existe una petición de ese usuario para esa carga
+    boolean existsByUsuarioEmisor_IdUsuarioAndCarga_IdCarga(Long idUsuarioEmisor, Long idCarga);
 
 }
